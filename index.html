@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#c62828">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<title>Blodtryck</title>
+<style>
+  :root {
+    --bg: #fafafa; --fg: #1c1b1f; --muted: #605d66; --card: #ffffff;
+    --line: #d0cdd4; --accent: #c62828; --accent-fg: #ffffff;
+    --ok: #1b6e2f; --err: #b3261c; --warn-bg: #fff3e0;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #121212; --fg: #ececf0; --muted: #a9a6b0; --card: #1e1e22;
+      --line: #3a3a40; --accent: #ef5350; --accent-fg: #1a0000;
+      --ok: #7ad48f; --err: #ff8a80; --warn-bg: #3a2a10;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: var(--bg); color: var(--fg);
+    font: 18px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    padding: env(safe-area-inset-top) 16px env(safe-area-inset-bottom);
+  }
+  main { max-width: 480px; margin: 0 auto; min-height: 100%; display: flex; flex-direction: column; }
+  [hidden] { display: none !important; }
+  header { display: flex; justify-content: space-between; align-items: center; padding: 12px 0; }
+  header h1 { font-size: 20px; margin: 0; font-weight: 600; }
+  .gear { background: none; border: 0; color: var(--muted); font-size: 26px; padding: 8px; cursor: pointer; }
+  .screen { flex: 1; display: flex; flex-direction: column; gap: 16px; padding-bottom: 24px; }
+  .center { justify-content: center; text-align: center; }
+  .big {
+    display: block; width: 100%; padding: 44px 16px; border: 0; border-radius: 28px;
+    background: var(--accent); color: var(--accent-fg); font-size: 28px; font-weight: 700;
+    cursor: pointer; text-align: center;
+  }
+  .big[aria-disabled="true"] { opacity: .4; pointer-events: none; }
+  .status { color: var(--muted); min-height: 1.4em; }
+  .status.ok { color: var(--ok); } .status.err { color: var(--err); }
+  .notice { background: var(--warn-bg); border-radius: 14px; padding: 12px 14px; }
+  .fields { display: grid; gap: 12px; }
+  label { display: block; font-size: 15px; color: var(--muted); margin-bottom: 4px; }
+  input[type=text], input[type=password], input[type=url], input[type=number] {
+    width: 100%; font: inherit; font-size: 28px; padding: 12px 14px; color: var(--fg);
+    background: var(--card); border: 2px solid var(--line); border-radius: 14px;
+  }
+  input:focus { outline: none; border-color: var(--accent); }
+  .settings input { font-size: 17px; }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  button.btn {
+    font: inherit; font-weight: 600; padding: 16px; border-radius: 14px; cursor: pointer;
+    border: 2px solid var(--line); background: var(--card); color: var(--fg);
+  }
+  button.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
+  button.btn:disabled { opacity: .4; cursor: default; }
+  .thumb { width: 100%; max-height: 160px; object-fit: contain; border-radius: 14px; background: #0003; }
+  .result { font-size: 24px; font-weight: 600; }
+  .small { font-size: 14px; color: var(--muted); }
+  input[type=file] { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Blodtryck</h1>
+    <button class="gear" id="gearBtn" aria-label="Inställningar">⚙</button>
+  </header>
+
+  <!-- 1. Startskärm -->
+  <section class="screen center" id="home">
+    <label class="big" id="shootBtn" for="photoInput" role="button" tabindex="0">Fota mätaren</label>
+    <div class="status" id="homeStatus"></div>
+    <div class="notice" id="fullNotice" hidden></div>
+  </section>
+
+  <!-- 2. Granska och rätta -->
+  <section class="screen" id="review" hidden>
+    <img class="thumb" id="thumb" alt="Foto av mätarens display">
+    <div class="status" id="readStatus"></div>
+    <div class="fields">
+      <div>
+        <label for="sys">Övertryck (systoliskt)</label>
+        <input type="number" id="sys" inputmode="numeric" min="50" max="300">
+      </div>
+      <div>
+        <label for="dia">Undertryck (diastoliskt)</label>
+        <input type="number" id="dia" inputmode="numeric" min="30" max="200">
+      </div>
+      <div>
+        <label for="pulse">Puls</label>
+        <input type="number" id="pulse" inputmode="numeric" min="20" max="250">
+      </div>
+    </div>
+    <div class="status" id="saveStatus"></div>
+    <div class="row">
+      <button class="btn" id="retakeBtn" type="button">Ta om</button>
+      <button class="btn primary" id="saveBtn" type="button" disabled>Spara</button>
+    </div>
+  </section>
+
+  <!-- 3. Bekräftelse -->
+  <section class="screen center" id="done" hidden>
+    <div class="result" id="doneText"></div>
+    <div class="small" id="doneSub"></div>
+    <button class="btn primary" id="doneBtn" type="button">OK</button>
+  </section>
+
+  <!-- Inställningar -->
+  <section class="screen settings" id="settings" hidden>
+    <p class="small">Sparas bara i den här telefonen.</p>
+    <div>
+      <label for="apiKey">Gemini API-nyckel</label>
+      <input type="password" id="apiKey" autocomplete="off" autocapitalize="off" spellcheck="false">
+    </div>
+    <div>
+      <label for="scriptUrl">Adress till Apps Script-webbappen</label>
+      <input type="url" id="scriptUrl" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="https://script.google.com/macros/s/.../exec">
+    </div>
+    <div class="status err" id="settingsStatus"></div>
+    <div class="row">
+      <button class="btn" id="settingsCancel" type="button">Avbryt</button>
+      <button class="btn primary" id="settingsSave" type="button">Spara</button>
+    </div>
+  </section>
+</main>
+
+<input type="file" id="photoInput" accept="image/*" capture="environment">
+
+<script>
+'use strict';
+
+// ---------- Inställningar i koden ----------
+// Modeller prövas i ordning; om en modell inte finns provas nästa.
+const GEMINI_MODELS = ['gemini-3.5-flash', 'gemini-2.5-flash'];
+const TOTAL = 28;
+const GEMINI_TIMEOUT_MS = 25000;
+const SAVE_TIMEOUT_MS = 20000;
+
+const $ = id => document.getElementById(id);
+const screens = ['home', 'review', 'done', 'settings'];
+function show(name) { screens.forEach(s => { $(s).hidden = (s !== name); }); }
+
+function getSetting(k) { try { return localStorage.getItem(k) || ''; } catch (e) { return ''; } }
+function setSetting(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+
+let seriesCount = null;     // antal sparade mätningar, om känt
+let imageBase64 = null;
+let readRun = 0;            // skiljer pågående avläsningar åt vid "Ta om"
+let saving = false;
+
+// ---------- Startskärm ----------
+async function refreshHome() {
+  const notice = $('fullNotice');
+  notice.hidden = true;
+  $('shootBtn').setAttribute('aria-disabled', 'false');
+  seriesCount = null;
+
+  if (!getSetting('scriptUrl') || !getSetting('apiKey')) {
+    $('homeStatus').className = 'status';
+    $('homeStatus').textContent = 'Öppna ⚙ och fyll i inställningarna först.';
+    return;
+  }
+  $('homeStatus').className = 'status';
+  $('homeStatus').textContent = 'Hämtar status …';
+  try {
+    const data = await fetchJson(getSetting('scriptUrl'), { method: 'GET' }, 10000);
+    if (data.status !== 'ok') throw new Error(data.message || 'Fel från skriptet');
+    seriesCount = data.count;
+    if (data.count >= TOTAL) {
+      $('homeStatus').textContent = '';
+      notice.textContent = 'Mätserien är full (' + TOTAL + ' av ' + TOTAL + '). Arkivera den i Sheetet och töm datarader i "Aktuell mätserie" innan du mäter igen.';
+      notice.hidden = false;
+      $('shootBtn').setAttribute('aria-disabled', 'true');
+    } else {
+      $('homeStatus').textContent = 'Nästa mätning: ' + (data.count + 1) + ' av ' + TOTAL;
+    }
+  } catch (err) {
+    $('homeStatus').className = 'status err';
+    $('homeStatus').textContent = 'Kunde inte hämta status, men du kan ändå mäta.';
+  }
+}
+
+// Gör etiketten tillgänglig med tangentbord/skärmläsare
+$('shootBtn').addEventListener('keydown', e => {
+  if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); $('photoInput').click(); }
+});
+$('shootBtn').addEventListener('click', e => {
+  if ($('shootBtn').getAttribute('aria-disabled') === 'true') e.preventDefault();
+});
+
+// ---------- Foto och avläsning ----------
+$('photoInput').addEventListener('change', async () => {
+  const file = $('photoInput').files[0];
+  $('photoInput').value = '';
+  if (!file) return;
+  startReview(file);
+});
+
+async function startReview(file) {
+  const run = ++readRun;
+  ['sys', 'dia', 'pulse'].forEach(id => { $(id).value = ''; });
+  $('saveStatus').textContent = '';
+  $('saveStatus').className = 'status';
+  $('readStatus').className = 'status';
+  $('readStatus').textContent = 'Läser av fotot …';
+  $('thumb').removeAttribute('src');
+  updateSaveEnabled();
+  show('review');
+
+  try {
+    const { base64, url } = await prepareImage(file);
+    if (run !== readRun) return;
+    imageBase64 = base64;
+    $('thumb').src = url;
+  } catch (err) {
+    if (run !== readRun) return;
+    manualFallback('Kunde inte öppna fotot. Fyll i själv eller ta om.');
+    return;
+  }
+
+  if (!getSetting('apiKey')) {
+    manualFallback('Ingen API-nyckel angiven. Fyll i själv.');
+    return;
+  }
+  try {
+    const v = await readWithGemini(imageBase64);
+    if (run !== readRun) return;
+    let filled = 0;
+    [['sys', v.systolic], ['dia', v.diastolic], ['pulse', v.pulse]].forEach(([id, val]) => {
+      if (Number.isInteger(val) && !$(id).value) { $(id).value = String(val); filled++; }
+    });
+    if (filled === 3) {
+      $('readStatus').className = 'status ok';
+      $('readStatus').textContent = 'Kontrollera värdena mot mätaren.';
+    } else {
+      manualFallback('Kunde inte läsa av allt. Fyll i själv eller ta om.');
+    }
+  } catch (err) {
+    if (run !== readRun) return;
+    manualFallback('Kunde inte läsa av. Fyll i själv eller ta om.' + (err && err.detail ? ' (' + err.detail + ')' : ''));
+  }
+  updateSaveEnabled();
+}
+
+function manualFallback(msg) {
+  $('readStatus').className = 'status err';
+  $('readStatus').textContent = msg;
+  updateSaveEnabled();
+}
+
+// Förminskar fotot till max 1280 px och JPEG, så det går snabbt att skicka
+function prepareImage(file) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      const max = 1280;
+      const scale = Math.min(1, max / Math.max(img.naturalWidth, img.naturalHeight));
+      const c = document.createElement('canvas');
+      c.width = Math.round(img.naturalWidth * scale);
+      c.height = Math.round(img.naturalHeight * scale);
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+      const dataUrl = c.toDataURL('image/jpeg', 0.85);
+      resolve({ base64: dataUrl.split(',')[1], url: url });
+    };
+    img.onerror = () => reject(new Error('bild'));
+    img.src = url;
+  });
+}
+
+async function readWithGemini(base64) {
+  const body = {
+    contents: [{
+      parts: [
+        { text: 'Bilden visar displayen på en blodtrycksmätare. Läs av övertryck (systoliskt, det övre/största talet), ' +
+                'undertryck (diastoliskt, det undre talet) och puls. Svara endast med heltal. ' +
+                'Om ett värde inte går att läsa säkert, sätt det till null. Gissa inte.' },
+        { inline_data: { mime_type: 'image/jpeg', data: base64 } }
+      ]
+    }],
+    generationConfig: {
+      temperature: 0,
+      responseMimeType: 'application/json',
+      responseSchema: {
+        type: 'OBJECT',
+        properties: {
+          systolic: { type: 'INTEGER', nullable: true },
+          diastolic: { type: 'INTEGER', nullable: true },
+          pulse: { type: 'INTEGER', nullable: true }
+        },
+        required: ['systolic', 'diastolic', 'pulse']
+      }
+    }
+  };
+
+  let lastErr = null;
+  for (const model of GEMINI_MODELS) {
+    const url = 'https://generativelanguage.googleapis.com/v1beta/models/' + model + ':generateContent';
+    let res;
+    try {
+      res = await fetchWithTimeout(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': getSetting('apiKey') },
+        body: JSON.stringify(body)
+      }, GEMINI_TIMEOUT_MS);
+    } catch (e) {
+      const err = new Error('nät'); err.detail = 'inget svar från Gemini'; throw err;
+    }
+    if (res.status === 404) { lastErr = Object.assign(new Error('modell'), { detail: 'modellen ' + model + ' finns inte' }); continue; }
+    if (!res.ok) {
+      let detail = 'Gemini svarade ' + res.status;
+      if (res.status === 429) detail = 'gränsen för gratisnivån är nådd';
+      if (res.status === 400 || res.status === 403) detail = 'kontrollera API-nyckeln i ⚙';
+      throw Object.assign(new Error('http'), { detail: detail });
+    }
+    const json = await res.json();
+    const text = json && json.candidates && json.candidates[0] && json.candidates[0].content &&
+                 json.candidates[0].content.parts && json.candidates[0].content.parts[0].text;
+    if (!text) throw Object.assign(new Error('tomt'), { detail: 'tomt svar' });
+    return JSON.parse(text);
+  }
+  throw lastErr || new Error('ingen modell');
+}
+
+// ---------- Granska och spara ----------
+function valuesOk() {
+  const s = parseInt($('sys').value, 10), d = parseInt($('dia').value, 10), p = parseInt($('pulse').value, 10);
+  return [s, d, p].every(Number.isInteger) && s >= 50 && s <= 300 && d >= 30 && d <= 200 && p >= 20 && p <= 250 && s > d;
+}
+function updateSaveEnabled() { $('saveBtn').disabled = saving || !valuesOk(); }
+['sys', 'dia', 'pulse'].forEach(id => $(id).addEventListener('input', () => {
+  $('saveStatus').textContent = ''; updateSaveEnabled();
+}));
+
+$('retakeBtn').addEventListener('click', () => {
+  readRun++;                       // kasta pågående avläsning
+  imageBase64 = null;
+  show('home');
+  refreshHome();
+  $('photoInput').click();         // öppna kameran direkt igen
+});
+
+$('saveBtn').addEventListener('click', async () => {
+  if (saving || !valuesOk()) return;
+  const url = getSetting('scriptUrl');
+  if (!url) { setSaveError('Ingen skriptadress angiven. Öppna ⚙.'); return; }
+  saving = true; updateSaveEnabled();
+  $('saveStatus').className = 'status'; $('saveStatus').textContent = 'Sparar …';
+  try {
+    const data = await fetchJson(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({
+        systolic: parseInt($('sys').value, 10),
+        diastolic: parseInt($('dia').value, 10),
+        pulse: parseInt($('pulse').value, 10)
+      })
+    }, SAVE_TIMEOUT_MS);
+
+    if (data.status === 'success') {
+      $('doneText').textContent = 'Sparad. Detta var mätning ' + data.count + ' av ' + data.total + '.';
+      $('doneSub').textContent = data.count >= data.total ? 'Serien är klar.' : '';
+      show('done');
+    } else if (data.status === 'full') {
+      setSaveError('Mätserien är full (' + data.total + ' av ' + data.total + '). Arkivera den i Sheetet och töm datarader i "Aktuell mätserie", tryck sedan Spara igen.');
+    } else {
+      setSaveError('Skriptet svarade med fel: ' + (data.message || 'okänt fel'));
+    }
+  } catch (err) {
+    setSaveError('Kunde inte spara. Dina värden finns kvar, tryck Spara igen.');
+  } finally {
+    saving = false; updateSaveEnabled();
+  }
+});
+
+function setSaveError(msg) { $('saveStatus').className = 'status err'; $('saveStatus').textContent = msg; }
+
+$('doneBtn').addEventListener('click', () => { show('home'); refreshHome(); });
+
+// ---------- Inställningar ----------
+$('gearBtn').addEventListener('click', openSettings);
+function openSettings() {
+  $('apiKey').value = getSetting('apiKey');
+  $('scriptUrl').value = getSetting('scriptUrl');
+  $('settingsStatus').textContent = '';
+  show('settings');
+}
+$('settingsCancel').addEventListener('click', () => { show('home'); refreshHome(); });
+$('settingsSave').addEventListener('click', () => {
+  const key = $('apiKey').value.trim(), url = $('scriptUrl').value.trim();
+  if (!key || !/^https:\/\/script\.google\.com\/.+\/exec$/.test(url)) {
+    $('settingsStatus').textContent = 'Fyll i nyckeln och adressen (ska sluta på /exec).';
+    return;
+  }
+  setSetting('apiKey', key); setSetting('scriptUrl', url);
+  show('home'); refreshHome();
+});
+
+// ---------- Hjälpfunktioner ----------
+function fetchWithTimeout(url, opts, ms) {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), ms);
+  return fetch(url, Object.assign({}, opts, { signal: ctrl.signal })).finally(() => clearTimeout(t));
+}
+async function fetchJson(url, opts, ms) {
+  const res = await fetchWithTimeout(url, opts, ms);
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  return res.json();
+}
+
+// ---------- Start ----------
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+if (!getSetting('apiKey') || !getSetting('scriptUrl')) openSettings(); else { show('home'); refreshHome(); }
+</script>
+</body>
+</html>
